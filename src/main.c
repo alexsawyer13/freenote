@@ -8,6 +8,13 @@
 #include <stdio.h>
 #include <stdint.h>
 
+/*
+ * The units for sizes in canvas is POINTS
+ * This is the default unit for a PDF file
+ * 1 point = 1/72 inch
+ * A4 = 595x842 points
+*/
+
 typedef struct fn_point
 {
 	f32 x, y;
@@ -29,8 +36,9 @@ typedef struct fn_canvas
 	fn_stroke *strokes;
 	u64 stroke_count;
 
-	f64 width;
-	f64 height;
+	f32 x, y;
+	f32 width;
+	f32 height;
 } fn_canvas;
 
 typedef enum fn_tool
@@ -49,19 +57,22 @@ typedef struct fn_input_settings
 typedef struct fn_app_state
 {
 	GLFWwindow *window;
+	i32 fb_width;
+	i32 fb_height;
 
 	GLuint buffer;
 
 	GLuint canvas_shader;
+	GLint canvas_transform_uniform_location;
 } fn_app_state;
 
 void
 fn_draw_canvas(
 		fn_app_state *app,
 		fn_canvas *canvas,
-		float xpos,
-		float ypos,
-		float pixels_per_uni
+		f32 viewport_x, // Top left of viewport in point space
+		f32 viewport_y,
+		f32 DPI
 );
 
 GLuint
@@ -87,19 +98,25 @@ int main()
 	app.canvas_shader = fn_shader_load(&arena, "src/canvas.vert", "src/canvas.frag");
 	CLIB_ASSERT(app.canvas_shader, "Failed to load canvas shader");
 
+	app.canvas_transform_uniform_location = glGetUniformLocation(app.canvas_shader, "u_transform");
+	CLIB_ASSERT(app.canvas_transform_uniform_location != -1, "Failed to get uniform location");
+
 	glGenBuffers(1, &app.buffer);
 
 	fn_canvas canvas = {};
+	canvas.width = 595.0f;
+	canvas.height = 842.0f;
+
 	fn_stroke stroke = {};
 	stroke.points = malloc(5 * sizeof(fn_point));
 	stroke.point_count = 5;
 	stroke.points[0].x = 0.0f;
 	stroke.points[0].y = 0.0f;
 	stroke.points[1].x = 0.0f;
-	stroke.points[1].y = 0.5f;
-	stroke.points[2].x = 0.5f;
-	stroke.points[2].y = 0.5f;
-	stroke.points[3].x = 0.5f;
+	stroke.points[1].y = 72.0f;
+	stroke.points[2].x = 72.0f;
+	stroke.points[2].y = 72.0f;
+	stroke.points[3].x = 72.0f;
 	stroke.points[3].y = 0.0f;
 	stroke.points[4].x = 0.0f;
 	stroke.points[4].y = 0.0f;
@@ -108,10 +125,10 @@ int main()
 
     while (!glfwWindowShouldClose(app.window))
     {
-		i32 width, height;
-		glfwGetWindowSize(app.window, &width, &height);
+		glfwGetFramebufferSize(app.window, &app.fb_width, &app.fb_height);
+		printf("(%d, %d)\n", app.fb_width, app.fb_height);
 
-		glViewport(0, 0, width, height);
+		glViewport(0, 0, app.fb_width, app.fb_height);
 		glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
@@ -122,7 +139,7 @@ int main()
 			printf("%f,%f\n", x, y);
 		}
 
-		fn_draw_canvas(&app, &canvas, 0.0f, 0.0f, 0.0f);
+		fn_draw_canvas(&app, &canvas, -10.0f, -10.0f, 400.0f);
 
         glfwSwapBuffers(app.window);
         glfwPollEvents();
@@ -136,21 +153,37 @@ void
 fn_draw_canvas(
 		fn_app_state *app,
 		fn_canvas *canvas,
-		float xpos,
-		float ypos,
-		float pixels_per_unit
+		f32 viewport_x, // Top left of viewport in point space
+		f32 viewport_y,
+		f32 DPI
 		)
 {
+	// Size of canvas in pixel space
+	// f32 width_pixels = canvas->width / 72.0f * DPI;
+	// f32 height_pixels = canvas->height / 72.0f * DPI;
+
+	// Size of frambuffer in point size
+	f32 framebuffer_width_points = app->fb_width * 72.0f / DPI;
+	f32 framebuffer_height_points = app->fb_height * 72.0f / DPI;
+
+	// Centre of the frambuffer in point space
+	f32 framebuffer_centre_point_x = viewport_x + framebuffer_width_points * 0.5f;
+	f32 framebuffer_centre_point_y = viewport_y + framebuffer_height_points * 0.5f;
+
+	// (x, y) - framebuffer_centre_point is vector from framebuffer centre to point in point space
+	// (x, -y) flips the y axis for NDC axes
+	// divide by (framebuffer_width_points, framebuffer_height_points)/2 and subtract (1, 1) to get -1 to 1
+
 	for (u64 i = 0; i < canvas->stroke_count; i++)
 	{
 		fn_stroke *stroke = &canvas->strokes[i];
 		for (u64 j = 0; j < stroke->point_count; j++)
 		{
 			fn_point *point = &stroke->points[j];	
-
 			printf("(%f, %f)\n", point->x, point->y);
 		}
 		printf("\n\n\n");
+
 		glBindBuffer(GL_ARRAY_BUFFER, app->buffer);
 		glBufferData(GL_ARRAY_BUFFER, canvas->strokes[i].point_count * sizeof(fn_point), canvas->strokes[i].points, GL_DYNAMIC_DRAW);
 
@@ -158,6 +191,12 @@ fn_draw_canvas(
 		glEnableVertexAttribArray(0);
 
 		glUseProgram(app->canvas_shader);
+		glUniform4f(app->canvas_transform_uniform_location,
+				framebuffer_centre_point_x,
+				framebuffer_centre_point_y,
+				framebuffer_width_points,
+				framebuffer_height_points
+		);
 
 		glDrawArrays(GL_LINE_STRIP, 0, stroke->point_count);
 	}
