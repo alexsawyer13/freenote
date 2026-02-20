@@ -14,64 +14,76 @@
  * A4 = 595x842 points
 */
 
-typedef struct v2
+#define FN_NUM_SEGMENT_POINTS 16
+
+#define V2_ZERO ((v2){0.0f, 0.0f})
+#define V2_A4_SIZE ((v2){595.0f, 842.0f})
+
+typedef struct
 {
-	float x;
-	float y;
+	f32 x;
+	f32 y;
 } v2;
 
 typedef struct fn_point
 {
-	f32 x, y;
+	v2 pos;
+	f32 t;
+	f32 pressure;
 } fn_point;
+
+typedef struct fn_segment
+{
+	fn_point points[FN_NUM_SEGMENT_POINTS];
+	u64 num_points;
+	struct fn_segment *next;
+} fn_segment;
 
 typedef struct fn_stroke
 {
-	fn_point *points;
-	u64 point_count;
-
-	f32 bounding_box_x;
-	f32 bounding_box_y;
-	f32 bounding_box_width;
-	f32 bounding_box_height;
+	fn_segment first_segment;
+	fn_segment *final_segment;
+	v2 bounding_box_pos;
+	v2 bounding_box_size;
+	struct fn_stroke *next;
 } fn_stroke;
 
-typedef struct fn_canvas
+typedef struct fn_page
 {
-	fn_stroke *strokes;
-	u64 stroke_count;
+	clib_arena mem;
+	fn_stroke first_stroke;	
+	fn_stroke *final_stroke;
+	struct fn_page *prev;
+	struct fn_page *next;
+} fn_page;
 
-	f32 x, y;
-	f32 width;
-	f32 height;
-} fn_canvas;
-
-typedef enum fn_tool
+typedef struct
 {
-	FN_TOOL_PEN,
-	FN_TOOL_SELECT,
-	FN_TOOL_LASSO,
-} fn_tool;
-
-typedef struct fn_input_settings
-{
-	fn_tool current_tool;
-	u64 colour;
-} fn_input_settings;
+	fn_page first_page;
+	v2 page_size;
+	v2 viewport;
+	float DPI;
+} fn_note;
 
 typedef struct fn_app_state
 {
 	// App data
-	fn_canvas *current_canvas;
+	fn_note current_note;
+
+	fn_stroke *current_stroke;
+	fn_segment *current_segment;
 
 	// Platform data
-
 	GLFWwindow *window;
-	i32 fb_width;
-	i32 fb_height;
+
+	v2 mouse_pos;
+	v2 last_mouse_pos;
+
+	i32 framebuffer_width;
+	i32 framebuffer_height;
+	v2  framebuffer_size;
 
 	// Graphics data
-
 	GLuint stroke_buffer;
 	GLuint square_buffer;
 
@@ -81,13 +93,15 @@ typedef struct fn_app_state
 	GLint canvas_scale_uniform;
 } fn_app_state;
 
-void fn_draw_canvas(
+void fn_note_init(fn_note *note);
+
+void fn_note_draw(
 		fn_app_state *app,
-		fn_canvas *canvas,
-		f32 viewport_x, // Top left of viewport in point space
-		f32 viewport_y,
-		f32 DPI
+		fn_note *note
 );
+
+fn_stroke *fn_page_begin_stroke(fn_page *page);
+fn_segment *fn_stroke_begin_segment(fn_page *page, fn_stroke *stroke);
 
 GLuint fn_shader_load(
 		clib_arena *arena,

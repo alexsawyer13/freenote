@@ -68,6 +68,7 @@ void* clib_arena_alloc(clib_arena *a, u64 size)
 		a->current_block->next_block = new_block;
 		a->current_block = new_block;
 		a->current_index = sizeof(clib_arena_block);
+		memset(new_block, 0, a->block_size);
 	}
 
 	// Now we definitely have a valid spot for the memory to go!
