@@ -8,10 +8,11 @@ layout (location = 0) in vec2 a_point;
 
 // (framebuffer centre in point space.xy, framebuffer in point space.xy)
 uniform vec4 u_transform; // (ax, ay, bx, by)
+uniform vec2 u_scale;
 
 void main()
 {
-	float x = (a_point.x - u_transform.x) / (u_transform.z * 0.5);
-	float y = (u_transform.y - a_point.y) / (u_transform.w * 0.5);
+	float x = (a_point.x*u_scale.x - u_transform.x) / (u_transform.z * 0.5);
+	float y = (u_transform.y - a_point.y*u_scale.y) / (u_transform.w * 0.5);
 	gl_Position = vec4(x, y, 0.0, 1.0);
 }

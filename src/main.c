@@ -15,6 +15,12 @@
  * A4 = 595x842 points
 */
 
+typedef struct v2
+{
+	float x;
+	float y;
+} v2;
+
 typedef struct fn_point
 {
 	f32 x, y;
@@ -60,10 +66,13 @@ typedef struct fn_app_state
 	i32 fb_width;
 	i32 fb_height;
 
-	GLuint buffer;
+	GLuint stroke_buffer;
+	GLuint square_buffer;
 
 	GLuint canvas_shader;
-	GLint canvas_transform_uniform_location;
+	GLint canvas_transform_uniform;
+	GLint canvas_colour_uniform;
+	GLint canvas_scale_uniform;
 } fn_app_state;
 
 void
@@ -82,6 +91,10 @@ fn_shader_load(
 		const char *fragment_path
 );
 
+// Converts from point space to pixel space and vice versa
+v2 fn_point_to_pixel(v2 point, v2 viewport, v2 framebuffer, float DPI);
+v2 fn_pixel_to_point(v2 point, v2 viewport, v2 framebuffer, float DPI);
+
 int main()
 {
 	fn_app_state app = {};
@@ -98,10 +111,26 @@ int main()
 	app.canvas_shader = fn_shader_load(&arena, "src/canvas.vert", "src/canvas.frag");
 	CLIB_ASSERT(app.canvas_shader, "Failed to load canvas shader");
 
-	app.canvas_transform_uniform_location = glGetUniformLocation(app.canvas_shader, "u_transform");
-	CLIB_ASSERT(app.canvas_transform_uniform_location != -1, "Failed to get uniform location");
+	app.canvas_transform_uniform = glGetUniformLocation(app.canvas_shader, "u_transform");
+	CLIB_ASSERT(app.canvas_transform_uniform != -1, "Failed to get uniform location");
+	app.canvas_colour_uniform = glGetUniformLocation(app.canvas_shader, "u_colour");
+	CLIB_ASSERT(app.canvas_colour_uniform != -1, "Failed to get uniform location");
+	app.canvas_scale_uniform = glGetUniformLocation(app.canvas_shader, "u_scale");
+	CLIB_ASSERT(app.canvas_scale_uniform != -1, "Failed to get uniform location");
 
-	glGenBuffers(1, &app.buffer);
+	static float square_vertices[] = {
+		0.0f, 0.0f,
+		1.0f, 0.0f,
+		1.0f, 1.0f,
+		0.0f, 0.0f,
+		1.0f, 1.0f,
+		0.0f, 1.0f,
+	};
+
+	glGenBuffers(1, &app.stroke_buffer);
+	glGenBuffers(1, &app.square_buffer);
+	glBindBuffer(GL_ARRAY_BUFFER, app.square_buffer);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(square_vertices), square_vertices, GL_STATIC_DRAW);
 
 	fn_canvas canvas = {};
 	canvas.width = 595.0f;
@@ -129,14 +158,18 @@ int main()
 		printf("(%d, %d)\n", app.fb_width, app.fb_height);
 
 		glViewport(0, 0, app.fb_width, app.fb_height);
-		glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
+		//glClearColor(0.91f, 0.914f, 0.922f, 1.0f);
+		glClearColor(0.0f, 1.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
 		if (glfwGetMouseButton(app.window, GLFW_MOUSE_BUTTON_1))
 		{
 			double x,y;
 			glfwGetCursorPos(app.window, &x, &y);
-			printf("%f,%f\n", x, y);
+
+			v2 point = fn_pixel_to_point((v2){x, y}, (v2){-10.0f, -10.0f}, (v2){(float)(app.fb_width), (float)(app.fb_height)}, 400.0f);
+
+			printf("%f,%f\n", point.x, point.y);
 		}
 
 		fn_draw_canvas(&app, &canvas, -10.0f, -10.0f, 400.0f);
@@ -184,21 +217,32 @@ fn_draw_canvas(
 		}
 		printf("\n\n\n");
 
-		glBindBuffer(GL_ARRAY_BUFFER, app->buffer);
+		glBindBuffer(GL_ARRAY_BUFFER, app->stroke_buffer);
 		glBufferData(GL_ARRAY_BUFFER, canvas->strokes[i].point_count * sizeof(fn_point), canvas->strokes[i].points, GL_DYNAMIC_DRAW);
-
 		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(fn_point), offsetof(fn_point, x));
 		glEnableVertexAttribArray(0);
 
 		glUseProgram(app->canvas_shader);
-		glUniform4f(app->canvas_transform_uniform_location,
+		glUniform4f(app->canvas_transform_uniform,
 				framebuffer_centre_point_x,
 				framebuffer_centre_point_y,
 				framebuffer_width_points,
 				framebuffer_height_points
 		);
+		glUniform4f(app->canvas_colour_uniform, 1.0f, 0.0f, 0.0f, 1.0f);
+		glUniform2f(app->canvas_scale_uniform, 1.0f, 1.0f);
 
+		glLineWidth(2.0f);
 		glDrawArrays(GL_LINE_STRIP, 0, stroke->point_count);
+
+		glBindBuffer(GL_ARRAY_BUFFER, app->square_buffer);
+		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), 0);
+		glEnableVertexAttribArray(0);
+		//glUniform4f(app->canvas_transform_uniform, 0.0f, 0.0f, 2.0f, 2.0f);
+		glUniform4f(app->canvas_colour_uniform, 1.0f, 1.0f, 1.0f, 1.0f);
+		glUniform2f(app->canvas_scale_uniform, canvas->width, canvas->height);
+
+		glDrawArrays(GL_TRIANGLES, 0, 6);
 	}
 
 }
@@ -287,4 +331,34 @@ fn_shader_load(
 	glDeleteShader(frag);
 
 	return prog;
+}
+
+// (framebuffer centre in point space.xy, framebuffer in point space.xy)
+//	float x = (a_point.x*u_scale.x - u_transform.x) / (u_transform.z * 0.5);
+//	float y = (u_transform.y - a_point.y*u_scale.y) / (u_transform.w * 0.5);
+
+v2 fn_point_to_pixel(v2 point, v2 viewport, v2 framebuffer, float DPI)
+{
+	v2 points_from_viewport = {
+		point.x - viewport.x,
+		point.y - viewport.y
+	};
+	v2 pixels_from_viewport = {
+		points_from_viewport.x / 72.0f * DPI,
+		points_from_viewport.y / 72.0f * DPI,
+	};
+	return pixels_from_viewport;
+}
+
+v2 fn_pixel_to_point(v2 point, v2 viewport, v2 framebuffer, float DPI)
+{
+	 v2 points_from_viewport = {
+		 point.x * DPI / 72.0f,
+		 point.y * DPI / 72.0f
+	 };
+	 v2 points_from_origin = {
+		 points_from_viewport.x + viewport.x,
+		 points_from_viewport.y + viewport.y,
+	 };
+	 return points_from_origin;
 }
