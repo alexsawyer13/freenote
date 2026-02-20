@@ -1,4 +1,6 @@
 #include "freenote.h"
+#include "GLFW/glfw3.h"
+#include "clib.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -17,33 +19,8 @@ static float square_vertices[] = {
 int main()
 {
 	fn_app_state app = {};
-	clib_arena arena = {};
 
-	clib_arena_init(&arena, 64*1024*1024);
-
-	CLIB_ASSERT(glfwInit(), "Failed to initialise GLFW");
-    app.window = glfwCreateWindow(630, 891, "Hello World", NULL, NULL);
-	CLIB_ASSERT(app.window, "Failed to create window");
-    glfwMakeContextCurrent(app.window);
-	CLIB_ASSERT(gladLoadGLLoader((GLADloadproc)glfwGetProcAddress), "Failed to load GLAD");
-
-	app.canvas_shader = fn_shader_load(&arena, "src/canvas.vert", "src/canvas.frag");
-	CLIB_ASSERT(app.canvas_shader, "Failed to load canvas shader");
-	clib_arena_reset(&arena);
-
-	app.canvas_transform_uniform = glGetUniformLocation(app.canvas_shader, "u_transform");
-	CLIB_ASSERT(app.canvas_transform_uniform != -1, "Failed to get uniform location");
-	app.canvas_colour_uniform = glGetUniformLocation(app.canvas_shader, "u_colour");
-	CLIB_ASSERT(app.canvas_colour_uniform != -1, "Failed to get uniform location");
-	app.canvas_scale_uniform = glGetUniformLocation(app.canvas_shader, "u_scale");
-	CLIB_ASSERT(app.canvas_scale_uniform != -1, "Failed to get uniform location");
-
-	glGenBuffers(1, &app.stroke_buffer);
-	glGenBuffers(1, &app.square_buffer);
-	glBindBuffer(GL_ARRAY_BUFFER, app.square_buffer);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(square_vertices), square_vertices, GL_STATIC_DRAW);
-	
-	fn_note_init(&app.current_note);
+	fn_app_init(&app);
 
     while (!glfwWindowShouldClose(app.window))
     {
@@ -58,48 +35,12 @@ int main()
 		{
 			double x,y;
 			glfwGetCursorPos(app.window, &x, &y);
-			app.last_mouse_pos.x = app.mouse_pos.x;
-			app.last_mouse_pos.y = app.mouse_pos.y;
-			app.mouse_pos.x = (f32)x;
-			app.mouse_pos.y = (f32)y;
+			app.mouse_pixels.x = (f32)x;
+			app.mouse_pixels.y = (f32)y;
+			app.mouse_points = fn_pixel_to_point(app.mouse_pixels, app.current_note.viewport, app.framebuffer_size, app.current_note.DPI);
 		}
 
-		// Process input
-
-		if (glfwGetMouseButton(app.window, GLFW_MOUSE_BUTTON_1))
-		{
-			v2 last_mouse = fn_pixel_to_point(app.mouse_pos, app.current_note.viewport, app.framebuffer_size, app.current_note.DPI);
-			v2 mouse = fn_pixel_to_point(app.mouse_pos, app.current_note.viewport, app.framebuffer_size, app.current_note.DPI);
-
-			if (app.time - app.last_point_time > FN_POINT_SAMPLE_TIME)
-			{
-				fn_page *page = &app.current_note.first_page;
-
-				if (app.current_stroke == NULL)
-				{
-					app.current_stroke = fn_page_begin_stroke(page);
-				}
-
-				if (app.current_segment == NULL || (app.current_segment->num_points >= FN_NUM_SEGMENT_POINTS))
-				{
-					app.current_segment = fn_stroke_begin_segment(page, app.current_stroke);
-				}
-
-				app.current_segment->points[app.current_segment->num_points] = (fn_point) {
-					.pos = mouse,
-					.t = 0.0f,
-					.pressure = 0.0f
-				};
-				app.current_segment->num_points++;
-				app.last_point_time = app.time;
-			}
-		}
-		else
-		{
-			app.current_stroke = NULL;
-			app.current_segment = NULL;
-		}
-
+		fn_process_input(&app);
 
 		// Prepare for rendering
 		glViewport(0, 0, app.framebuffer_width, app.framebuffer_height);
@@ -116,10 +57,8 @@ int main()
     return 0;
 }
 
-void fn_note_draw(
-		fn_app_state *app,
-		fn_note *note
-)
+// TODO: Use depth testing...
+void fn_note_draw(fn_app_state *app, fn_note *note)
 {
 	// Size of frambuffer in point size
 	f32 framebuffer_width_points = app->framebuffer_width * 72.0f / note->DPI;
@@ -130,28 +69,31 @@ void fn_note_draw(
 	f32 framebuffer_centre_point_y = note->viewport.y + framebuffer_height_points * 0.5f;
 
 	// Use canvas shader with the appropriate point->NDC transform
-	glUseProgram(app->canvas_shader);
-	glUniform4f(app->canvas_transform_uniform,
+	glUseProgram(app->canvas_shader.program);
+	glUniform4f(app->canvas_shader.transform,
 			framebuffer_centre_point_x,
 			framebuffer_centre_point_y,
 			framebuffer_width_points,
 			framebuffer_height_points
 	);
+	glUniform2f(app->canvas_shader.translate, 0.0f, 0.0f);
 
-	fn_page *page = &note->first_page;
+	fn_page *page = note->first_page;
+	v2 page_pos = (v2){0.0f, 0.0f};
 	while (page != NULL)
 	{
 		// Draw a white rectangle to represent the page
 		glBindBuffer(GL_ARRAY_BUFFER, app->square_buffer);
 		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), 0);
 		glEnableVertexAttribArray(0);
-		glUniform4f(app->canvas_colour_uniform, 1.0f, 1.0f, 1.0f, 1.0f);
-		glUniform2f(app->canvas_scale_uniform, note->page_size.x, note->page_size.y);
+		glUniform4f(app->canvas_shader.colour, 1.0f, 1.0f, 1.0f, 1.0f);
+		glUniform2f(app->canvas_shader.scale, note->page_size.x, note->page_size.y);
+		glUniform2f(app->canvas_shader.translate, page_pos.x, page_pos.y);
 		glDrawArrays(GL_TRIANGLES, 0, 6);
 
 		// Render each stroke separately for now...
 
-		fn_stroke *stroke = &page->first_stroke;
+		fn_stroke *stroke = page->first_stroke;
 		while (stroke != NULL)
 		{
 			// Collect points from stroke segments into a buffer
@@ -178,8 +120,9 @@ void fn_note_draw(
 			glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(v2), 0);
 			glEnableVertexAttribArray(0);
 
-			glUniform4f(app->canvas_colour_uniform, 1.0f, 0.0f, 0.0f, 1.0f);
-			glUniform2f(app->canvas_scale_uniform, 1.0f, 1.0f);
+			glUniform4f(app->canvas_shader.colour, 1.0f, 0.0f, 0.0f, 1.0f);
+			glUniform2f(app->canvas_shader.scale, 1.0f, 1.0f);
+			glUniform2f(app->canvas_shader.transform, page_pos.x, page_pos.y);
 			glLineWidth(2.0f);
 			glDrawArrays(GL_LINE_STRIP, 0, num_points);
 			
@@ -187,32 +130,11 @@ void fn_note_draw(
 		}
 
 		page = page->next;
+		page_pos.y += note->page_size.y + note->page_separation;
 	}
-	
-		
-	// Draw the strokes
-//	for (u64 i = 0; i < canvas->stroke_count; i++)
-//	{
-//		fn_stroke *stroke = &canvas->strokes[i];
-//
-//		glBindBuffer(GL_ARRAY_BUFFER, app->stroke_buffer);
-//		glBufferData(GL_ARRAY_BUFFER, stroke->point_count * sizeof(fn_point), stroke->points, GL_DYNAMIC_DRAW);
-//		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(fn_point), offsetof(fn_point, x));
-//		glEnableVertexAttribArray(0);
-//
-//		glUniform4f(app->canvas_colour_uniform, 1.0f, 0.0f, 0.0f, 1.0f);
-//		glUniform2f(app->canvas_scale_uniform, 1.0f, 1.0f);
-//		glLineWidth(2.0f);
-//		glDrawArrays(GL_LINE_STRIP, 0, stroke->point_count);
-//	}
-
 }
 
-GLuint fn_shader_load(
-		clib_arena *arena,
-		const char *vertex_path,
-		const char *fragment_path
-		)
+GLuint fn_shader_load(clib_arena *arena, const char *vertex_path, const char *fragment_path)
 {
 	GLuint vert, frag, prog;
 	vert = 0;
@@ -328,31 +250,27 @@ void fn_note_init(fn_note *note)
 	note->viewport = (v2){-10.0f, -10.0f};
 	note->page_size = V2_A4_SIZE;
 	note->DPI = 100.0f;
-	note->first_page = (fn_page){};
-	note->first_page.final_stroke = &note->first_page.first_stroke;
-	clib_arena_init(&note->first_page.mem, 1024*1024);
+	note->page_separation = 72.0f;
+	clib_arena_init(&note->mem, 100*1024);
 
-	fn_segment *segment = &note->first_page.first_stroke.first_segment;
+	note->first_page = clib_arena_alloc(&note->mem, sizeof(fn_page));
+	fn_page_init(note->first_page);
 
-	segment->points[0].pos.x = 0.0f;
-	segment->points[0].pos.y = 0.0f;
-	segment->points[1].pos.x = 72.0f;
-	segment->points[1].pos.y = 0.0f;
-	segment->points[2].pos.x = 72.0f;
-	segment->points[2].pos.y = 72.0f;
-	segment->points[3].pos.x = 0.0f;
-	segment->points[3].pos.y = 72.0f;
-	segment->points[4].pos.x = 0.0f;
-	segment->points[4].pos.y = 0.0f;
-	segment->num_points = 5;
-	segment->next = NULL;
+	note->first_page->next = clib_arena_alloc(&note->mem, sizeof(fn_page));
+	fn_page_init(note->first_page->next);
+
+	fn_page_info_recalc(note);
 }
 
 fn_stroke *fn_page_begin_stroke(fn_page *page)
 {
+	if (page->first_stroke == NULL)
+	{
+		page->first_stroke = clib_arena_alloc(&page->mem, sizeof(fn_stroke));
+	}
 	if (page->final_stroke == NULL)
 	{
-		page->final_stroke = &page->first_stroke;
+		page->final_stroke = page->first_stroke;
 		return page->final_stroke;
 	}
 
@@ -375,4 +293,156 @@ fn_segment *fn_stroke_begin_segment(fn_page *page, fn_stroke *stroke)
 	stroke->final_segment = segment;
 	
 	return segment;
+}
+
+void fn_page_init(fn_page *page)
+{
+	*page = (fn_page){0};
+	clib_arena_init(&page->mem, FN_PAGE_ARENA_SIZE);
+}
+
+void fn_segment_add_point(fn_segment *segment, fn_point point)
+{
+	CLIB_ASSERT(segment->num_points < FN_NUM_SEGMENT_POINTS, "Segment full!");
+	segment->points[segment->num_points] = point;
+	segment->num_points++;
+}
+
+fn_page *fn_page_at_point(fn_note *note, v2 point)
+{
+	fn_page *page = note->first_page;
+	v2 page_pos = (v2){0.0f, 0.0f};
+
+	while (page != NULL)
+	{
+		// Work out the y bounds for the page
+
+		// Just need to check it's not overlapping into the NEXT page
+		// Pages are always in order, so if we are at a page, we've already checked previous pages
+		// so it's definitely NOT in a previous page.
+		// This has the added benefit of attaching anything at a negative coordinate to page 1
+		// especially important for infinite page in the future I think...
+		if (point.y < (page_pos.y + note->page_size.y + note->page_separation)) return page;
+		if (page->next == NULL) return page;
+
+
+		page = page->next;
+		page_pos.y += note->page_size.y + note->page_separation;
+	}
+	
+	// If we didn't find the page, then it must be further down than the last page so attach it to that??
+	// TODO: This might need some rework when adding an additional page at the end...
+	return page;
+}
+
+void fn_page_info_recalc(fn_note *note)
+{
+	fn_page *page = note->first_page;
+	u64 current_page = 0;
+	v2 page_pos = V2_ZERO;
+
+	while (page != NULL)
+	{
+		page->page_number = current_page;
+		page->canvas_position = page_pos;
+
+		current_page++;
+		page = page->next;
+		page_pos.y += note->page_size.y + note->page_separation;
+	}
+}
+
+void fn_process_input(fn_app_state *app)
+{
+		// Left click begins drawing mode
+		if (glfwGetMouseButton(app->window, GLFW_MOUSE_BUTTON_1))
+		{
+			// If we're not currently drawing and we're within a page, start drawing to it!
+			if (app->drawing_page == NULL)
+			{
+				fn_page *page = fn_page_at_point(&app->current_note, app->mouse_points);
+
+				v2 point_from_page = (v2){
+					app->mouse_points.x - page->canvas_position.x,
+					app->mouse_points.y - page->canvas_position.y,
+				};
+
+				if ((point_from_page.x > 0.0f && point_from_page.x < app->current_note.page_size.x) && 
+					(point_from_page.y > 0.0f && point_from_page.y < app->current_note.page_size.y))
+				{
+					// Create a stroke and segment to start drawing to
+					app->drawing_page = page;
+					app->drawing_stroke = fn_page_begin_stroke(app->drawing_page);
+					app->drawing_segment = fn_stroke_begin_segment(app->drawing_page, app->drawing_stroke);
+				}
+			}
+
+			// If we are now actually drawing, and the polling rate hasn't been exceeded, then draw!
+			if (app->drawing_page && (app->time - app->last_point_time > FN_POINT_SAMPLE_TIME))
+			{
+				CLIB_ASSERT(app->drawing_stroke, "No stroke");
+				CLIB_ASSERT(app->drawing_segment, "No segment");
+
+				// Calculated mouse position from current page origin
+				v2 point_from_page  = (v2){
+					app->mouse_points.x - app->drawing_page->canvas_position.x,
+					app->mouse_points.y - app->drawing_page->canvas_position.y,
+				};
+
+				// Allocate a new segment if needed
+				if (app->drawing_segment->num_points >= FN_NUM_SEGMENT_POINTS)
+					app->drawing_segment = fn_stroke_begin_segment(app->drawing_page, app->drawing_stroke);
+
+				// Add point to segment
+				fn_segment_add_point(app->drawing_segment, (fn_point) {
+						.pos = point_from_page,
+						.t = 0.0f,
+						.pressure = 0.0f
+				});
+
+				// Track time so we can stick to polling rate
+				app->last_point_time = app->time;
+			}
+		}
+		// If mouse isn't down, stop drawing!
+		else
+		{
+			app->drawing_page = NULL;
+			app->drawing_stroke = NULL;
+			app->drawing_segment = NULL;
+		}
+}
+
+void fn_app_init(fn_app_state *app)
+{
+	clib_arena startup_arena = {};
+	clib_arena_init(&startup_arena, 1024*1024);
+
+	CLIB_ASSERT(glfwInit(), "Failed to initialise GLFW");
+	app->window = glfwCreateWindow(630, 891, "Hello World", NULL, NULL);
+	CLIB_ASSERT(app->window, "Failed to create window");
+	glfwMakeContextCurrent(app->window);
+	CLIB_ASSERT(gladLoadGLLoader((GLADloadproc)glfwGetProcAddress), "Failed to load GLAD");
+
+	app->canvas_shader.program = fn_shader_load(&startup_arena, "src/canvas.vert", "src/canvas.frag");
+	CLIB_ASSERT(app->canvas_shader.program, "Failed to load canvas shader");
+	clib_arena_reset(&startup_arena);
+
+	app->canvas_shader.transform = glGetUniformLocation(app->canvas_shader.program, "u_transform");
+	CLIB_ASSERT(app->canvas_shader.transform != -1, "Failed to get uniform location");
+	app->canvas_shader.colour = glGetUniformLocation(app->canvas_shader.program, "u_colour");
+	CLIB_ASSERT(app->canvas_shader.colour != -1, "Failed to get uniform location");
+	app->canvas_shader.scale = glGetUniformLocation(app->canvas_shader.program, "u_scale");
+	CLIB_ASSERT(app->canvas_shader.scale != -1, "Failed to get uniform location");
+	app->canvas_shader.translate = glGetUniformLocation(app->canvas_shader.program, "u_translate");
+	CLIB_ASSERT(app->canvas_shader.translate != -1, "Failed to get uniform location");
+
+	glGenBuffers(1, &app->stroke_buffer);
+	glGenBuffers(1, &app->square_buffer);
+	glBindBuffer(GL_ARRAY_BUFFER, app->square_buffer);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(square_vertices), square_vertices, GL_STATIC_DRAW);
+
+	fn_note_init(&app->current_note);
+
+	clib_arena_destroy(&startup_arena);
 }

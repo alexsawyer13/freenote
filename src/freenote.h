@@ -16,6 +16,7 @@
 
 #define FN_NUM_SEGMENT_POINTS 16
 #define FN_POINT_SAMPLE_TIME 0.01f
+#define FN_PAGE_ARENA_SIZE (1024*1024)
 
 #define V2_ZERO ((v2){0.0f, 0.0f})
 #define V2_A4_SIZE ((v2){595.0f, 842.0f})
@@ -52,34 +53,46 @@ typedef struct fn_stroke
 typedef struct fn_page
 {
 	clib_arena mem;
-	fn_stroke first_stroke;	
+
+	v2 canvas_position;
+	u64 page_number;
+
+	fn_stroke *first_stroke;	
 	fn_stroke *final_stroke;
+
 	struct fn_page *prev;
 	struct fn_page *next;
 } fn_page;
 
 typedef struct
 {
-	fn_page first_page;
+	clib_arena mem;
+
+	fn_page *first_page;
+
 	v2 page_size;
+	float page_separation;
 	v2 viewport;
 	float DPI;
 } fn_note;
 
 typedef struct fn_app_state
 {
+	//clib_arena frame_arena;
+
 	// App data
 	fn_note current_note;
 
-	fn_stroke *current_stroke;
-	fn_segment *current_segment;
+	fn_page *drawing_page;
+	fn_stroke *drawing_stroke;
+	fn_segment *drawing_segment;
 	f32 last_point_time;
 
 	// Platform data
 	GLFWwindow *window;
 
-	v2 mouse_pos;
-	v2 last_mouse_pos;
+	v2 mouse_pixels;
+	v2 mouse_points;
 
 	i32 framebuffer_width;
 	i32 framebuffer_height;
@@ -91,30 +104,37 @@ typedef struct fn_app_state
 	GLuint stroke_buffer;
 	GLuint square_buffer;
 
-	GLuint canvas_shader;
-	GLint canvas_transform_uniform;
-	GLint canvas_colour_uniform;
-	GLint canvas_scale_uniform;
+	struct {
+		GLuint program;
+		GLint transform;
+		GLint colour;
+		GLint scale;
+		GLint translate;
+	} canvas_shader;
 } fn_app_state;
 
-void fn_note_init(fn_note *note);
+int main();
 
-void fn_note_draw(
-		fn_app_state *app,
-		fn_note *note
-);
+void fn_app_init(fn_app_state *app);
+void fn_process_input(fn_app_state *app);
+
+void fn_note_init(fn_note *note);
+void fn_note_draw(fn_app_state *app, fn_note *note);
+
+void fn_page_init(fn_page *page);
+fn_page *fn_page_at_point(fn_note *note, v2 point);
+void fn_page_info_recalc(fn_note *note);
 
 fn_stroke *fn_page_begin_stroke(fn_page *page);
 fn_segment *fn_stroke_begin_segment(fn_page *page, fn_stroke *stroke);
+void fn_segment_add_point(fn_segment *segment, fn_point point);
 
-GLuint fn_shader_load(
-		clib_arena *arena,
-		const char *vertex_path,
-		const char *fragment_path
-);
+GLuint fn_shader_load( clib_arena *arena, const char *vertex_path, const char *fragment_path);
 
 // Converts from point space to pixel space and vice versa
 v2 fn_point_to_pixel(v2 point, v2 viewport, v2 framebuffer, float DPI);
 v2 fn_pixel_to_point(v2 point, v2 viewport, v2 framebuffer, float DPI);
+
+
 
 #endif // _FREENOTE_H_
