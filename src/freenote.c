@@ -19,7 +19,6 @@ static float square_vertices[] = {
 int main()
 {
 	fn_app_state app = {};
-
 	fn_app_init(&app);
 
     while (!glfwWindowShouldClose(app.window))
@@ -79,7 +78,6 @@ void fn_note_draw(fn_app_state *app, fn_note *note)
 	glUniform2f(app->canvas_shader.translate, 0.0f, 0.0f);
 
 	fn_page *page = note->first_page;
-	v2 page_pos = (v2){0.0f, 0.0f};
 	while (page != NULL)
 	{
 		// Draw a white rectangle to represent the page
@@ -88,7 +86,7 @@ void fn_note_draw(fn_app_state *app, fn_note *note)
 		glEnableVertexAttribArray(0);
 		glUniform4f(app->canvas_shader.colour, 1.0f, 1.0f, 1.0f, 1.0f);
 		glUniform2f(app->canvas_shader.scale, note->page_size.x, note->page_size.y);
-		glUniform2f(app->canvas_shader.translate, page_pos.x, page_pos.y);
+		glUniform2f(app->canvas_shader.translate, page->position.x, page->position.y);
 		glDrawArrays(GL_TRIANGLES, 0, 6);
 
 		// Render each stroke separately for now...
@@ -122,7 +120,7 @@ void fn_note_draw(fn_app_state *app, fn_note *note)
 
 			glUniform4f(app->canvas_shader.colour, 1.0f, 0.0f, 0.0f, 1.0f);
 			glUniform2f(app->canvas_shader.scale, 1.0f, 1.0f);
-			glUniform2f(app->canvas_shader.transform, page_pos.x, page_pos.y);
+			glUniform2f(app->canvas_shader.transform, page->position.x, page->position.y);
 			glLineWidth(2.0f);
 			glDrawArrays(GL_LINE_STRIP, 0, num_points);
 			
@@ -130,7 +128,6 @@ void fn_note_draw(fn_app_state *app, fn_note *note)
 		}
 
 		page = page->next;
-		page_pos.y += note->page_size.y + note->page_separation;
 	}
 }
 
@@ -283,6 +280,9 @@ fn_stroke *fn_page_begin_stroke(fn_page *page)
 
 fn_segment *fn_stroke_begin_segment(fn_page *page, fn_stroke *stroke)
 {
+	CLIB_ASSERT(page, "no page");
+	CLIB_ASSERT(stroke, "no stroke");
+
 	if (stroke->final_segment == NULL) {
 		stroke->final_segment = &stroke->first_segment;
 		return stroke->final_segment;
@@ -344,7 +344,7 @@ void fn_page_info_recalc(fn_note *note)
 	while (page != NULL)
 	{
 		page->page_number = current_page;
-		page->canvas_position = page_pos;
+		page->position = page_pos;
 
 		current_page++;
 		page = page->next;
@@ -354,67 +354,87 @@ void fn_page_info_recalc(fn_note *note)
 
 void fn_process_input(fn_app_state *app)
 {
-		// Left click begins drawing mode
-		if (glfwGetMouseButton(app->window, GLFW_MOUSE_BUTTON_1))
+	if (app->tool == FN_TOOL_PEN)
+		fn_input_drawing(app);
+	else
+		app->drawing_page = NULL;
+
+}
+
+void fn_input_drawing(fn_app_state *app)
+{
+	// If not holding left click, then we are no longer drawing
+
+	if (glfwGetMouseButton(app->window, GLFW_MOUSE_BUTTON_1) != GLFW_PRESS)
+	{
+		app->drawing_page = NULL;
+		app->drawing_stroke = NULL;
+		app->drawing_segment = NULL;
+	}
+
+	// If we're not currently drawing and we're within a page, start drawing to it!
+	if (app->drawing_page == NULL)
+	{
+		fn_page *page = fn_page_at_point(&app->current_note, app->mouse_points);
+
+		v2 point_from_page = (v2){
+			app->mouse_points.x - page->position.x,
+			app->mouse_points.y - page->position.y,
+		};
+
+		if ((point_from_page.x > 0.0f && point_from_page.x < app->current_note.page_size.x) && 
+				(point_from_page.y > 0.0f && point_from_page.y < app->current_note.page_size.y))
 		{
-			// If we're not currently drawing and we're within a page, start drawing to it!
-			if (app->drawing_page == NULL)
-			{
-				fn_page *page = fn_page_at_point(&app->current_note, app->mouse_points);
+			// Create a stroke and segment to start drawing to
+			app->drawing_page = page;
+			app->drawing_stroke = fn_page_begin_stroke(app->drawing_page);
+			app->drawing_segment = fn_stroke_begin_segment(app->drawing_page, app->drawing_stroke);
+		}
+	}
 
-				v2 point_from_page = (v2){
-					app->mouse_points.x - page->canvas_position.x,
-					app->mouse_points.y - page->canvas_position.y,
-				};
+	// If we are now actually drawing, and the polling rate hasn't been exceeded, then draw!
+	if (app->drawing_page && (app->time - app->last_point_time > FN_POINT_SAMPLE_TIME))
+	{
+		CLIB_ASSERT(app->drawing_stroke, "No stroke");
+		CLIB_ASSERT(app->drawing_segment, "No segment");
 
-				if ((point_from_page.x > 0.0f && point_from_page.x < app->current_note.page_size.x) && 
-					(point_from_page.y > 0.0f && point_from_page.y < app->current_note.page_size.y))
-				{
-					// Create a stroke and segment to start drawing to
-					app->drawing_page = page;
-					app->drawing_stroke = fn_page_begin_stroke(app->drawing_page);
-					app->drawing_segment = fn_stroke_begin_segment(app->drawing_page, app->drawing_stroke);
-				}
-			}
+		// Calculated mouse position from current page origin
+		v2 point_from_page  = (v2){
+			app->mouse_points.x - app->drawing_page->position.x,
+			app->mouse_points.y - app->drawing_page->position.y,
+		};
 
-			// If we are now actually drawing, and the polling rate hasn't been exceeded, then draw!
-			if (app->drawing_page && (app->time - app->last_point_time > FN_POINT_SAMPLE_TIME))
-			{
-				CLIB_ASSERT(app->drawing_stroke, "No stroke");
-				CLIB_ASSERT(app->drawing_segment, "No segment");
+		// Allocate a new segment if needed
+		if (app->drawing_segment->num_points >= FN_NUM_SEGMENT_POINTS)
+			app->drawing_segment = fn_stroke_begin_segment(app->drawing_page, app->drawing_stroke);
 
-				// Calculated mouse position from current page origin
-				v2 point_from_page  = (v2){
-					app->mouse_points.x - app->drawing_page->canvas_position.x,
-					app->mouse_points.y - app->drawing_page->canvas_position.y,
-				};
+		// Clamp point to page
+		// Drawing can only begin in page, but can go back out, I don't really want this...
 
-				// Allocate a new segment if needed
-				if (app->drawing_segment->num_points >= FN_NUM_SEGMENT_POINTS)
-					app->drawing_segment = fn_stroke_begin_segment(app->drawing_page, app->drawing_stroke);
+		if (point_from_page.x < 0.0f) point_from_page.x = 0.0f;
+		if (point_from_page.y < 0.0f) point_from_page.y = 0.0f;
+		if (point_from_page.x > app->current_note.page_size.x) point_from_page.x = app->current_note.page_size.x;
+		if (point_from_page.y > app->current_note.page_size.y) point_from_page.y = app->current_note.page_size.y;
 
-				// Add point to segment
-				fn_segment_add_point(app->drawing_segment, (fn_point) {
-						.pos = point_from_page,
-						.t = 0.0f,
-						.pressure = 0.0f
+		// Add point to segment
+		fn_segment_add_point(app->drawing_segment, (fn_point) {
+				.pos = point_from_page,
+				.t = 0.0f,
+				.pressure = 0.0f
 				});
 
-				// Track time so we can stick to polling rate
-				app->last_point_time = app->time;
-			}
-		}
-		// If mouse isn't down, stop drawing!
-		else
-		{
-			app->drawing_page = NULL;
-			app->drawing_stroke = NULL;
-			app->drawing_segment = NULL;
-		}
+		// Track time so we can stick to polling rate
+		app->last_point_time = app->time;
+	}
 }
 
 void fn_app_init(fn_app_state *app)
 {
+	*app = (fn_app_state){0};
+
+	app->mode = FN_MODE_NOTE;
+	app->tool = FN_TOOL_PEN;
+
 	clib_arena startup_arena = {};
 	clib_arena_init(&startup_arena, 1024*1024);
 

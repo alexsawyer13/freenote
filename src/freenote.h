@@ -54,7 +54,7 @@ typedef struct fn_page
 {
 	clib_arena mem;
 
-	v2 canvas_position;
+	v2 position;
 	u64 page_number;
 
 	fn_stroke *first_stroke;	
@@ -76,10 +76,19 @@ typedef struct
 	float DPI;
 } fn_note;
 
+typedef enum
+{
+	FN_MODE_MENU,
+	FN_MODE_NOTE,
+} fn_mode;
+
+typedef enum
+{
+	FN_TOOL_PEN,
+} fn_tool;
+
 typedef struct fn_app_state
 {
-	//clib_arena frame_arena;
-
 	// App data
 	fn_note current_note;
 
@@ -87,6 +96,9 @@ typedef struct fn_app_state
 	fn_stroke *drawing_stroke;
 	fn_segment *drawing_segment;
 	f32 last_point_time;
+
+	fn_mode mode;
+	fn_tool tool;
 
 	// Platform data
 	GLFWwindow *window;
@@ -117,6 +129,7 @@ int main();
 
 void fn_app_init(fn_app_state *app);
 void fn_process_input(fn_app_state *app);
+void fn_input_drawing(fn_app_state *app);
 
 void fn_note_init(fn_note *note);
 void fn_note_draw(fn_app_state *app, fn_note *note);

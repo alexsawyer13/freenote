@@ -15,6 +15,9 @@ int boc_main(boc *b)
 	boc_add_lib("glfw3");
 	boc_add_lib("m");
 	boc_add_lib("GL");
+
+	boc_flag_debug_symbols();
+	boc_flag_sanitise_addresses();
 //	boc_add_lib("X11");
 //	boc_add_lib("pthread");
 //	boc_add_lib("Xrandr");
