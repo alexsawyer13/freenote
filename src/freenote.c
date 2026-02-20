@@ -50,6 +50,9 @@ int main()
 		// Update framebuffer size
 		glfwGetFramebufferSize(app.window, &app.framebuffer_width, &app.framebuffer_height);
 		app.framebuffer_size = (v2){(float)app.framebuffer_width, (float)app.framebuffer_height};
+		
+		// Update time
+		app.time = (f32)glfwGetTime();
 
 		// Track mouse position in window
 		{
@@ -68,30 +71,35 @@ int main()
 			v2 last_mouse = fn_pixel_to_point(app.mouse_pos, app.current_note.viewport, app.framebuffer_size, app.current_note.DPI);
 			v2 mouse = fn_pixel_to_point(app.mouse_pos, app.current_note.viewport, app.framebuffer_size, app.current_note.DPI);
 
-			fn_page *page = &app.current_note.first_page;
-
-			if (app.current_stroke == NULL)
+			if (app.time - app.last_point_time > FN_POINT_SAMPLE_TIME)
 			{
-				app.current_stroke = fn_page_begin_stroke(page);
-			}
+				fn_page *page = &app.current_note.first_page;
 
-			if (app.current_segment == NULL || (app.current_segment->num_points >= FN_NUM_SEGMENT_POINTS))
-			{
-				app.current_segment = fn_stroke_begin_segment(page, app.current_stroke);
-			}
+				if (app.current_stroke == NULL)
+				{
+					app.current_stroke = fn_page_begin_stroke(page);
+				}
 
-			app.current_segment->points[app.current_segment->num_points] = (fn_point) {
-				.pos = mouse,
-				.t = 0.0f,
-				.pressure = 0.0f
-			};
-			app.current_segment->num_points++;
+				if (app.current_segment == NULL || (app.current_segment->num_points >= FN_NUM_SEGMENT_POINTS))
+				{
+					app.current_segment = fn_stroke_begin_segment(page, app.current_stroke);
+				}
+
+				app.current_segment->points[app.current_segment->num_points] = (fn_point) {
+					.pos = mouse,
+					.t = 0.0f,
+					.pressure = 0.0f
+				};
+				app.current_segment->num_points++;
+				app.last_point_time = app.time;
+			}
 		}
 		else
 		{
 			app.current_stroke = NULL;
 			app.current_segment = NULL;
 		}
+
 
 		// Prepare for rendering
 		glViewport(0, 0, app.framebuffer_width, app.framebuffer_height);

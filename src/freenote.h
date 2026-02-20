@@ -15,6 +15,7 @@
 */
 
 #define FN_NUM_SEGMENT_POINTS 16
+#define FN_POINT_SAMPLE_TIME 0.01f
 
 #define V2_ZERO ((v2){0.0f, 0.0f})
 #define V2_A4_SIZE ((v2){595.0f, 842.0f})
@@ -72,6 +73,7 @@ typedef struct fn_app_state
 
 	fn_stroke *current_stroke;
 	fn_segment *current_segment;
+	f32 last_point_time;
 
 	// Platform data
 	GLFWwindow *window;
@@ -82,6 +84,8 @@ typedef struct fn_app_state
 	i32 framebuffer_width;
 	i32 framebuffer_height;
 	v2  framebuffer_size;
+	
+	f32 time;
 
 	// Graphics data
 	GLuint stroke_buffer;
