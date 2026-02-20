@@ -1,99 +1,17 @@
-#include "clib.h"
-
-#define GLFW_INCLUDE_NONE
-#include <GLFW/glfw3.h>
-#include <glad/glad.h>
+#include "freenote.h"
 
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
 
-/*
- * The units for sizes in canvas is POINTS
- * This is the default unit for a PDF file
- * 1 point = 1/72 inch
- * A4 = 595x842 points
-*/
-
-typedef struct v2
-{
-	float x;
-	float y;
-} v2;
-
-typedef struct fn_point
-{
-	f32 x, y;
-} fn_point;
-
-typedef struct fn_stroke
-{
-	fn_point *points;
-	u64 point_count;
-
-	f32 bounding_box_x;
-	f32 bounding_box_y;
-	f32 bounding_box_width;
-	f32 bounding_box_height;
-} fn_stroke;
-
-typedef struct fn_canvas
-{
-	fn_stroke *strokes;
-	u64 stroke_count;
-
-	f32 x, y;
-	f32 width;
-	f32 height;
-} fn_canvas;
-
-typedef enum fn_tool
-{
-	FN_TOOL_PEN,
-	FN_TOOL_SELECT,
-	FN_TOOL_LASSO,
-} fn_tool;
-
-typedef struct fn_input_settings
-{
-	fn_tool current_tool;
-	u64 colour;
-} fn_input_settings;
-
-typedef struct fn_app_state
-{
-	GLFWwindow *window;
-	i32 fb_width;
-	i32 fb_height;
-
-	GLuint stroke_buffer;
-	GLuint square_buffer;
-
-	GLuint canvas_shader;
-	GLint canvas_transform_uniform;
-	GLint canvas_colour_uniform;
-	GLint canvas_scale_uniform;
-} fn_app_state;
-
-void
-fn_draw_canvas(
-		fn_app_state *app,
-		fn_canvas *canvas,
-		f32 viewport_x, // Top left of viewport in point space
-		f32 viewport_y,
-		f32 DPI
-);
-
-GLuint
-fn_shader_load(
-		clib_arena *arena,
-		const char *vertex_path,
-		const char *fragment_path
-);
-
-// Converts from point space to pixel space and vice versa
-v2 fn_point_to_pixel(v2 point, v2 viewport, v2 framebuffer, float DPI);
-v2 fn_pixel_to_point(v2 point, v2 viewport, v2 framebuffer, float DPI);
+static float square_vertices[] = {
+	0.0f, 0.0f,
+	1.0f, 0.0f,
+	1.0f, 1.0f,
+	0.0f, 0.0f,
+	1.0f, 1.0f,
+	0.0f, 1.0f,
+};
 
 int main()
 {
@@ -118,15 +36,6 @@ int main()
 	app.canvas_scale_uniform = glGetUniformLocation(app.canvas_shader, "u_scale");
 	CLIB_ASSERT(app.canvas_scale_uniform != -1, "Failed to get uniform location");
 
-	static float square_vertices[] = {
-		0.0f, 0.0f,
-		1.0f, 0.0f,
-		1.0f, 1.0f,
-		0.0f, 0.0f,
-		1.0f, 1.0f,
-		0.0f, 1.0f,
-	};
-
 	glGenBuffers(1, &app.stroke_buffer);
 	glGenBuffers(1, &app.square_buffer);
 	glBindBuffer(GL_ARRAY_BUFFER, app.square_buffer);
@@ -137,42 +46,55 @@ int main()
 	canvas.height = 842.0f;
 
 	fn_stroke stroke = {};
-	stroke.points = malloc(5 * sizeof(fn_point));
+	
+	fn_point points[5];
+	points[0].x = 0.0f;
+	points[0].y = 0.0f;
+	points[1].x = 72.0f;
+	points[1].y = 0.0f;
+	points[2].x = 72.0f;
+	points[2].y = 72.0f;
+	points[3].x = 0.0f;
+	points[3].y = 72.0f;
+	points[4].x = 0.0f;
+	points[4].y = 0.0f;
+
+	stroke.points = points;
 	stroke.point_count = 5;
-	stroke.points[0].x = 0.0f;
-	stroke.points[0].y = 0.0f;
-	stroke.points[1].x = 0.0f;
-	stroke.points[1].y = 72.0f;
-	stroke.points[2].x = 72.0f;
-	stroke.points[2].y = 72.0f;
-	stroke.points[3].x = 72.0f;
-	stroke.points[3].y = 0.0f;
-	stroke.points[4].x = 0.0f;
-	stroke.points[4].y = 0.0f;
+
 	canvas.strokes = &stroke;
 	canvas.stroke_count = 1;
+
+	v2 viewport = {-10.0f, -10.0f};
+	float DPI = 400.0f;
+
+	float last_mouse_x, last_mouse_y;
+	float mouse_x, mouse_y;
+	mouse_x = mouse_y = last_mouse_x = last_mouse_y = 0.0f;
 
     while (!glfwWindowShouldClose(app.window))
     {
 		glfwGetFramebufferSize(app.window, &app.fb_width, &app.fb_height);
-		printf("(%d, %d)\n", app.fb_width, app.fb_height);
 
 		glViewport(0, 0, app.fb_width, app.fb_height);
-		//glClearColor(0.91f, 0.914f, 0.922f, 1.0f);
-		glClearColor(0.0f, 1.0f, 0.0f, 1.0f);
+		glClearColor(0.91f, 0.914f, 0.922f, 1.0f);
+		//glClearColor(0.0f, 1.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
+
+		double x,y;
+		glfwGetCursorPos(app.window, &x, &y);
+		last_mouse_x = mouse_x;
+		last_mouse_y = mouse_y;
+		mouse_x = x;
+		mouse_y = y;
 
 		if (glfwGetMouseButton(app.window, GLFW_MOUSE_BUTTON_1))
 		{
-			double x,y;
-			glfwGetCursorPos(app.window, &x, &y);
-
-			v2 point = fn_pixel_to_point((v2){x, y}, (v2){-10.0f, -10.0f}, (v2){(float)(app.fb_width), (float)(app.fb_height)}, 400.0f);
-
-			printf("%f,%f\n", point.x, point.y);
+			v2 mouse = fn_pixel_to_point((v2){mouse_x, mouse_y}, viewport, (v2){(float)(app.fb_width), (float)(app.fb_height)}, DPI);
+			printf("(%f, %f)\n", mouse.x, mouse.y);
 		}
 
-		fn_draw_canvas(&app, &canvas, -10.0f, -10.0f, 400.0f);
+		fn_draw_canvas(&app, &canvas, viewport.x, viewport.y, DPI);
 
         glfwSwapBuffers(app.window);
         glfwPollEvents();
@@ -182,8 +104,7 @@ int main()
     return 0;
 }
 
-void
-fn_draw_canvas(
+void fn_draw_canvas(
 		fn_app_state *app,
 		fn_canvas *canvas,
 		f32 viewport_x, // Top left of viewport in point space
@@ -191,10 +112,6 @@ fn_draw_canvas(
 		f32 DPI
 		)
 {
-	// Size of canvas in pixel space
-	// f32 width_pixels = canvas->width / 72.0f * DPI;
-	// f32 height_pixels = canvas->height / 72.0f * DPI;
-
 	// Size of frambuffer in point size
 	f32 framebuffer_width_points = app->fb_width * 72.0f / DPI;
 	f32 framebuffer_height_points = app->fb_height * 72.0f / DPI;
@@ -203,52 +120,42 @@ fn_draw_canvas(
 	f32 framebuffer_centre_point_x = viewport_x + framebuffer_width_points * 0.5f;
 	f32 framebuffer_centre_point_y = viewport_y + framebuffer_height_points * 0.5f;
 
-	// (x, y) - framebuffer_centre_point is vector from framebuffer centre to point in point space
-	// (x, -y) flips the y axis for NDC axes
-	// divide by (framebuffer_width_points, framebuffer_height_points)/2 and subtract (1, 1) to get -1 to 1
-
+	// Use canvas shader with the appropriate point->NDC transform
+	glUseProgram(app->canvas_shader);
+	glUniform4f(app->canvas_transform_uniform,
+			framebuffer_centre_point_x,
+			framebuffer_centre_point_y,
+			framebuffer_width_points,
+			framebuffer_height_points
+	);
+	
+	// Draw a white rectangle to denote the canvas
+	glBindBuffer(GL_ARRAY_BUFFER, app->square_buffer);
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), 0);
+	glEnableVertexAttribArray(0);
+	glUniform4f(app->canvas_colour_uniform, 1.0f, 1.0f, 1.0f, 1.0f);
+	glUniform2f(app->canvas_scale_uniform, canvas->width, canvas->height);
+	glDrawArrays(GL_TRIANGLES, 0, 6);
+		
+	// Draw the strokes
 	for (u64 i = 0; i < canvas->stroke_count; i++)
 	{
 		fn_stroke *stroke = &canvas->strokes[i];
-		for (u64 j = 0; j < stroke->point_count; j++)
-		{
-			fn_point *point = &stroke->points[j];	
-			printf("(%f, %f)\n", point->x, point->y);
-		}
-		printf("\n\n\n");
 
 		glBindBuffer(GL_ARRAY_BUFFER, app->stroke_buffer);
-		glBufferData(GL_ARRAY_BUFFER, canvas->strokes[i].point_count * sizeof(fn_point), canvas->strokes[i].points, GL_DYNAMIC_DRAW);
+		glBufferData(GL_ARRAY_BUFFER, stroke->point_count * sizeof(fn_point), stroke->points, GL_DYNAMIC_DRAW);
 		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(fn_point), offsetof(fn_point, x));
 		glEnableVertexAttribArray(0);
 
-		glUseProgram(app->canvas_shader);
-		glUniform4f(app->canvas_transform_uniform,
-				framebuffer_centre_point_x,
-				framebuffer_centre_point_y,
-				framebuffer_width_points,
-				framebuffer_height_points
-		);
 		glUniform4f(app->canvas_colour_uniform, 1.0f, 0.0f, 0.0f, 1.0f);
 		glUniform2f(app->canvas_scale_uniform, 1.0f, 1.0f);
-
 		glLineWidth(2.0f);
 		glDrawArrays(GL_LINE_STRIP, 0, stroke->point_count);
-
-		glBindBuffer(GL_ARRAY_BUFFER, app->square_buffer);
-		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), 0);
-		glEnableVertexAttribArray(0);
-		//glUniform4f(app->canvas_transform_uniform, 0.0f, 0.0f, 2.0f, 2.0f);
-		glUniform4f(app->canvas_colour_uniform, 1.0f, 1.0f, 1.0f, 1.0f);
-		glUniform2f(app->canvas_scale_uniform, canvas->width, canvas->height);
-
-		glDrawArrays(GL_TRIANGLES, 0, 6);
 	}
 
 }
 
-GLuint
-fn_shader_load(
+GLuint fn_shader_load(
 		clib_arena *arena,
 		const char *vertex_path,
 		const char *fragment_path
@@ -353,8 +260,8 @@ v2 fn_point_to_pixel(v2 point, v2 viewport, v2 framebuffer, float DPI)
 v2 fn_pixel_to_point(v2 point, v2 viewport, v2 framebuffer, float DPI)
 {
 	 v2 points_from_viewport = {
-		 point.x * DPI / 72.0f,
-		 point.y * DPI / 72.0f
+		 point.x / DPI * 72.0f,
+		 point.y / DPI * 72.0f
 	 };
 	 v2 points_from_origin = {
 		 points_from_viewport.x + viewport.x,

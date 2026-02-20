@@ -7,7 +7,7 @@ int boc_main(boc *b)
 	boc_add_include("include");
 
 	boc_add_src("vendor/glad.c");
-    boc_add_src("src/main.c");
+    boc_add_src("src/freenote.c");
     boc_add_src("src/clib.c");
 
 	boc_add_lib_dir("lib");
