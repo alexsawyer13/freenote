@@ -21,7 +21,7 @@ int main()
 	clib_arena_init(&arena, 64*1024*1024);
 
 	CLIB_ASSERT(glfwInit(), "Failed to initialise GLFW");
-    app.window = glfwCreateWindow(1000, 800, "Hello World", NULL, NULL);
+    app.window = glfwCreateWindow(630, 891, "Hello World", NULL, NULL);
 	CLIB_ASSERT(app.window, "Failed to create window");
     glfwMakeContextCurrent(app.window);
 	CLIB_ASSERT(gladLoadGLLoader((GLADloadproc)glfwGetProcAddress), "Failed to load GLAD");
@@ -66,7 +66,7 @@ int main()
 	canvas.stroke_count = 1;
 
 	v2 viewport = {-10.0f, -10.0f};
-	float DPI = 400.0f;
+	float DPI = 50.0f;
 
 	float last_mouse_x, last_mouse_y;
 	float mouse_x, mouse_y;
