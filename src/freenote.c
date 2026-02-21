@@ -52,6 +52,7 @@ int main()
         glfwPollEvents();
     }
 
+	glfwDestroyWindow(app.window);
     glfwTerminate();
     return 0;
 }
@@ -370,6 +371,7 @@ void fn_input_drawing(fn_app_state *app)
 		app->drawing_page = NULL;
 		app->drawing_stroke = NULL;
 		app->drawing_segment = NULL;
+		return;
 	}
 
 	// If we're not currently drawing and we're within a page, start drawing to it!
@@ -421,7 +423,7 @@ void fn_input_drawing(fn_app_state *app)
 				.pos = point_from_page,
 				.t = 0.0f,
 				.pressure = 0.0f
-				});
+		});
 
 		// Track time so we can stick to polling rate
 		app->last_point_time = app->time;
