@@ -52,7 +52,7 @@ typedef struct fn_stroke
 
 typedef struct fn_page
 {
-	clib_arena mem;
+	clib_arena *mem;
 
 	v2 position;
 	u64 page_number;
@@ -66,14 +66,15 @@ typedef struct fn_page
 
 typedef struct
 {
-	clib_arena mem;
+	clib_arena *mem;
 
 	fn_page *first_page;
 
-	v2 page_size;
-	float page_separation;
 	v2 viewport;
 	float DPI;
+
+	v2 page_size;
+	float page_separation;
 } fn_note;
 
 typedef enum
@@ -131,10 +132,15 @@ void fn_app_init(fn_app_state *app);
 void fn_process_input(fn_app_state *app);
 void fn_input_drawing(fn_app_state *app);
 
+void fn_glfw_key_callback(GLFWwindow* window, int key, int scancode, int action, int mods);
+
 void fn_note_init(fn_note *note);
+void fn_note_destroy(fn_note *note);
 void fn_note_draw(fn_app_state *app, fn_note *note);
+void fn_note_print_info(fn_note *note);
 
 void fn_page_init(fn_page *page);
+void fn_page_destroy(fn_page *page);
 fn_page *fn_page_at_point(fn_note *note, v2 point);
 void fn_page_info_recalc(fn_note *note);
 

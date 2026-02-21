@@ -249,12 +249,12 @@ void fn_note_init(fn_note *note)
 	note->page_size = V2_A4_SIZE;
 	note->DPI = 100.0f;
 	note->page_separation = 72.0f;
-	clib_arena_init(&note->mem, 100*1024);
+	note->mem = clib_arena_init(100*1024);
 
-	note->first_page = clib_arena_alloc(&note->mem, sizeof(fn_page));
+	note->first_page = clib_arena_alloc(note->mem, sizeof(fn_page));
 	fn_page_init(note->first_page);
 
-	note->first_page->next = clib_arena_alloc(&note->mem, sizeof(fn_page));
+	note->first_page->next = clib_arena_alloc(note->mem, sizeof(fn_page));
 	fn_page_init(note->first_page->next);
 
 	fn_page_info_recalc(note);
@@ -264,7 +264,7 @@ fn_stroke *fn_page_begin_stroke(fn_page *page)
 {
 	if (page->first_stroke == NULL)
 	{
-		page->first_stroke = clib_arena_alloc(&page->mem, sizeof(fn_stroke));
+		page->first_stroke = clib_arena_alloc(page->mem, sizeof(fn_stroke));
 	}
 	if (page->final_stroke == NULL)
 	{
@@ -272,7 +272,7 @@ fn_stroke *fn_page_begin_stroke(fn_page *page)
 		return page->final_stroke;
 	}
 
-	fn_stroke *stroke = clib_arena_alloc(&page->mem, sizeof(fn_stroke));
+	fn_stroke *stroke = clib_arena_alloc(page->mem, sizeof(fn_stroke));
 	page->final_stroke->next = stroke;
 	page->final_stroke = stroke;
 
@@ -289,7 +289,7 @@ fn_segment *fn_stroke_begin_segment(fn_page *page, fn_stroke *stroke)
 		return stroke->final_segment;
 	}
 
-	fn_segment *segment = clib_arena_alloc(&page->mem, sizeof(fn_segment));
+	fn_segment *segment = clib_arena_alloc(page->mem, sizeof(fn_segment));
 	stroke->final_segment->next = segment;
 	stroke->final_segment = segment;
 	
@@ -299,7 +299,7 @@ fn_segment *fn_stroke_begin_segment(fn_page *page, fn_stroke *stroke)
 void fn_page_init(fn_page *page)
 {
 	*page = (fn_page){0};
-	clib_arena_init(&page->mem, FN_PAGE_ARENA_SIZE);
+	page->mem = clib_arena_init(FN_PAGE_ARENA_SIZE);
 }
 
 void fn_segment_add_point(fn_segment *segment, fn_point point)
@@ -359,7 +359,6 @@ void fn_process_input(fn_app_state *app)
 		fn_input_drawing(app);
 	else
 		app->drawing_page = NULL;
-
 }
 
 void fn_input_drawing(fn_app_state *app)
@@ -437,8 +436,8 @@ void fn_app_init(fn_app_state *app)
 	app->mode = FN_MODE_NOTE;
 	app->tool = FN_TOOL_PEN;
 
-	clib_arena startup_arena = {};
-	clib_arena_init(&startup_arena, 1024*1024);
+	clib_arena *startup_arena;
+	startup_arena = clib_arena_init(1024*1024);
 
 	CLIB_ASSERT(glfwInit(), "Failed to initialise GLFW");
 	app->window = glfwCreateWindow(630, 891, "Hello World", NULL, NULL);
@@ -446,9 +445,12 @@ void fn_app_init(fn_app_state *app)
 	glfwMakeContextCurrent(app->window);
 	CLIB_ASSERT(gladLoadGLLoader((GLADloadproc)glfwGetProcAddress), "Failed to load GLAD");
 
-	app->canvas_shader.program = fn_shader_load(&startup_arena, "src/canvas.vert", "src/canvas.frag");
+	glfwSetWindowUserPointer(app->window, app);
+	glfwSetKeyCallback(app->window, fn_glfw_key_callback);
+
+	app->canvas_shader.program = fn_shader_load(startup_arena, "src/canvas.vert", "src/canvas.frag");
 	CLIB_ASSERT(app->canvas_shader.program, "Failed to load canvas shader");
-	clib_arena_reset(&startup_arena);
+	clib_arena_reset(startup_arena);
 
 	app->canvas_shader.transform = glGetUniformLocation(app->canvas_shader.program, "u_transform");
 	CLIB_ASSERT(app->canvas_shader.transform != -1, "Failed to get uniform location");
@@ -467,4 +469,54 @@ void fn_app_init(fn_app_state *app)
 	fn_note_init(&app->current_note);
 
 	clib_arena_destroy(&startup_arena);
+}
+
+void fn_note_destroy(fn_note *note)
+{
+	fn_page *page = note->first_page;
+	while (page != NULL)
+	{
+		fn_page *next_page = page->next;
+		fn_page_destroy(page);
+		page = next_page;
+	}
+	clib_arena_destroy(&note->mem);
+	*note = (fn_note){0};
+}
+
+void fn_page_destroy(fn_page *page)
+{
+	clib_arena_destroy(&page->mem);
+	*page = (fn_page){0};
+}
+
+void fn_note_print_info(fn_note *note)
+{
+	u64 total_page_data = 0;
+
+	clib_arena_print_info(note->mem);
+
+	fn_page *page = note->first_page;
+	while (page != NULL)
+	{
+		printf("Page %llu\n", page->page_number);
+		clib_arena_print_info(page->mem);
+		total_page_data += page->mem->total_allocation_size;
+
+		page = page->next;
+	}
+	printf("Total page data: %llu bytes\n", total_page_data);
+	printf("Total note data: %llu bytes\n", total_page_data + note->mem->total_allocation_size);
+
+}
+
+void fn_glfw_key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
+{
+	fn_app_state *app = (fn_app_state*)glfwGetWindowUserPointer(window);
+	CLIB_ASSERT(app, "app is NULL");
+	
+	if (key == GLFW_KEY_M && action == GLFW_PRESS)
+	{
+		fn_note_print_info(&app->current_note);
+	}
 }
