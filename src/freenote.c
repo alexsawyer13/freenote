@@ -384,9 +384,13 @@ void fn_input_move(fn_app_state *app, i32 is_move_down)
 		return;
 	}
 
+	// Where the mouse is in relation to the OLD viewport...
+	// Important to avoid visual flickers
+	v2 old_mouse_canvas = fn_pixel_to_point(app->mouse_screen, app->old_viewport, app->framebuffer_size, app->current_note->DPI);
+
 	v2 movement = (v2) {
-		app->mouse_canvas.x - app->movement_anchor.x,
-		app->mouse_canvas.y - app->movement_anchor.y
+		old_mouse_canvas.x - app->movement_anchor.x,
+		old_mouse_canvas.y - app->movement_anchor.y
 	};
 
 	app->current_note->viewport.x = app->old_viewport.x - movement.x;
