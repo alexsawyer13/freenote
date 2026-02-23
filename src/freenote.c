@@ -120,10 +120,10 @@ void fn_note_draw(fn_app_state *app, fn_note *note)
 			glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(v2), 0);
 			glEnableVertexAttribArray(0);
 
-			glUniform4f(app->canvas_shader.colour, 1.0f, 0.0f, 0.0f, 1.0f);
+			glUniform4f(app->canvas_shader.colour, 0.0f, 0.0f, 0.0f, 1.0f);
 			glUniform2f(app->canvas_shader.scale, 1.0f, 1.0f);
 			glUniform2f(app->canvas_shader.transform, page->position.x, page->position.y);
-			glLineWidth(2.0f);
+			glLineWidth(5.0f);
 			glDrawArrays(GL_LINE_STRIP, 0, num_points);
 			
 			stroke = stroke->next;
@@ -617,9 +617,23 @@ void fn_glfw_key_callback(GLFWwindow* window, int key, int scancode, int action,
 	fn_app_state *app = (fn_app_state*)glfwGetWindowUserPointer(window);
 	CLIB_ASSERT(app, "app is NULL");
 
-	if (action == GLFW_PRESS)
+	if (action == GLFW_PRESS || action == GLFW_REPEAT)
 	{
 		if (key == GLFW_KEY_M) fn_note_print_info(app->current_note);
 		if (key == GLFW_KEY_S) fn_note_write_file(app, app->current_note, "/home/alex/dev/freenote/note.fn");
+		if (key == GLFW_KEY_P) 
+		{
+			fn_page *page = app->current_note->first_page;
+			while (page)
+			{
+				if (page->next == NULL) break;
+				page = page->next;
+			}
+			// Page is last page
+			fn_page *new_page = clib_arena_alloc(app->current_note->mem, sizeof(fn_page));
+			page->next = new_page;
+			fn_page_init(new_page);
+			fn_page_info_recalc(app->current_note);
+		}
 	}
 }
