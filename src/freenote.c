@@ -36,7 +36,7 @@ int main()
 			glfwGetCursorPos(app.window, &x, &y);
 			app.mouse_screen.x = (f32)x;
 			app.mouse_screen.y = (f32)y;
-			app.mouse_canvas = fn_pixel_to_point(app.mouse_screen, app.current_note.viewport, app.framebuffer_size, app.current_note.DPI);
+			app.mouse_canvas = fn_pixel_to_point(app.mouse_screen, app.current_note->viewport, app.framebuffer_size, app.current_note->DPI);
 		}
 
 		fn_process_input(&app);
@@ -46,7 +46,7 @@ int main()
 		glClearColor(0.91f, 0.914f, 0.922f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
-		fn_note_draw(&app, &app.current_note);
+		fn_note_draw(&app, app.current_note);
 
         glfwSwapBuffers(app.window);
         glfwPollEvents();
@@ -96,13 +96,14 @@ void fn_note_draw(fn_app_state *app, fn_note *note)
 		while (stroke != NULL)
 		{
 			// Collect points from stroke segments into a buffer
-			v2 points[1024];
+			clib_arena_start_scratch(app->mem);
+			v2 *points = clib_arena_alloc(app->mem, 1024*1024);
 			u64 num_points = 0;
 
 			fn_segment *segment = &stroke->first_segment;
 			while (segment != NULL)
 			{
-				CLIB_ASSERT(num_points + segment->num_points <= 1024, "Out of room in buffer!");
+				CLIB_ASSERT(num_points + segment->num_points <= 1024*1024, "Out of room in buffer!");
 				for (u64 i = 0; i < segment->num_points; i++)
 				{
 					points[num_points] = segment->points[i].pos;
@@ -126,6 +127,8 @@ void fn_note_draw(fn_app_state *app, fn_note *note)
 			glDrawArrays(GL_LINE_STRIP, 0, num_points);
 			
 			stroke = stroke->next;
+
+			clib_arena_stop_scratch(app->mem);
 		}
 
 		page = page->next;
@@ -371,13 +374,13 @@ void fn_input_move(fn_app_state *app, i32 is_move_down)
 {
 	if (glfwGetKey(app->window, GLFW_KEY_R) == GLFW_PRESS)
 	{
-		app->current_note.viewport = (v2) {-10.0f, -10.0f};
+		app->current_note->viewport = (v2) {-10.0f, -10.0f};
 	}
 
 	if (!is_move_down)
 	{
 		app->movement_anchor = app->mouse_canvas;
-		app->old_viewport = app->current_note.viewport;
+		app->old_viewport = app->current_note->viewport;
 		return;
 	}
 
@@ -386,8 +389,8 @@ void fn_input_move(fn_app_state *app, i32 is_move_down)
 		app->mouse_canvas.y - app->movement_anchor.y
 	};
 
-	app->current_note.viewport.x = app->old_viewport.x - movement.x;
-	app->current_note.viewport.y = app->old_viewport.y - movement.y;
+	app->current_note->viewport.x = app->old_viewport.x - movement.x;
+	app->current_note->viewport.y = app->old_viewport.y - movement.y;
 }
 
 void fn_input_pen(fn_app_state *app, i32 is_pen_down)
@@ -405,15 +408,15 @@ void fn_input_pen(fn_app_state *app, i32 is_pen_down)
 	// If we're not currently drawing and we're within a page, start drawing to it!
 	if (app->drawing_page == NULL)
 	{
-		fn_page *page = fn_page_at_point(&app->current_note, app->mouse_canvas);
+		fn_page *page = fn_page_at_point(app->current_note, app->mouse_canvas);
 
 		v2 point_from_page = (v2){
 			app->mouse_canvas.x - page->position.x,
 			app->mouse_canvas.y - page->position.y,
 		};
 
-		if ((point_from_page.x > 0.0f && point_from_page.x < app->current_note.page_size.x) && 
-				(point_from_page.y > 0.0f && point_from_page.y < app->current_note.page_size.y))
+		if ((point_from_page.x > 0.0f && point_from_page.x < app->current_note->page_size.x) && 
+				(point_from_page.y > 0.0f && point_from_page.y < app->current_note->page_size.y))
 		{
 			// Create a stroke and segment to start drawing to
 			app->drawing_page = page;
@@ -443,8 +446,8 @@ void fn_input_pen(fn_app_state *app, i32 is_pen_down)
 
 		if (point_from_page.x < 0.0f) point_from_page.x = 0.0f;
 		if (point_from_page.y < 0.0f) point_from_page.y = 0.0f;
-		if (point_from_page.x > app->current_note.page_size.x) point_from_page.x = app->current_note.page_size.x;
-		if (point_from_page.y > app->current_note.page_size.y) point_from_page.y = app->current_note.page_size.y;
+		if (point_from_page.x > app->current_note->page_size.x) point_from_page.x = app->current_note->page_size.x;
+		if (point_from_page.y > app->current_note->page_size.y) point_from_page.y = app->current_note->page_size.y;
 
 		// Add point to segment
 		fn_segment_add_point(app->drawing_segment, (fn_point) {
@@ -461,14 +464,9 @@ void fn_input_pen(fn_app_state *app, i32 is_pen_down)
 void fn_app_init(fn_app_state *app)
 {
 	*app = (fn_app_state){0};
+	app->mem = clib_arena_init(8*1024*1024);
 
-	app->mode = FN_MODE_NOTE;
-	app->tool = FN_TOOL_PEN;
-	app->move_speed = 3.0f;
-
-	clib_arena *startup_arena;
-	startup_arena = clib_arena_init(1024*1024);
-
+	// Initialise GLFW and create window
 	CLIB_ASSERT(glfwInit(), "Failed to initialise GLFW");
 	app->window = glfwCreateWindow(630, 891, "Hello World", NULL, NULL);
 	CLIB_ASSERT(app->window, "Failed to create window");
@@ -478,10 +476,13 @@ void fn_app_init(fn_app_state *app)
 	glfwSetWindowUserPointer(app->window, app);
 	glfwSetKeyCallback(app->window, fn_glfw_key_callback);
 
-	app->canvas_shader.program = fn_shader_load(startup_arena, "src/canvas.vert", "src/canvas.frag");
+	// Load shaders (using scratch arena)
+	clib_arena_start_scratch(app->mem);
+	app->canvas_shader.program = fn_shader_load(app->mem, "src/canvas.vert", "src/canvas.frag");
 	CLIB_ASSERT(app->canvas_shader.program, "Failed to load canvas shader");
-	clib_arena_reset(startup_arena);
+	clib_arena_stop_scratch(app->mem);
 
+	// Get shader uniforms
 	app->canvas_shader.transform = glGetUniformLocation(app->canvas_shader.program, "u_transform");
 	CLIB_ASSERT(app->canvas_shader.transform != -1, "Failed to get uniform location");
 	app->canvas_shader.colour = glGetUniformLocation(app->canvas_shader.program, "u_colour");
@@ -491,14 +492,19 @@ void fn_app_init(fn_app_state *app)
 	app->canvas_shader.translate = glGetUniformLocation(app->canvas_shader.program, "u_translate");
 	CLIB_ASSERT(app->canvas_shader.translate != -1, "Failed to get uniform location");
 
+	// Create buffers for strokes and squares
 	glGenBuffers(1, &app->stroke_buffer);
 	glGenBuffers(1, &app->square_buffer);
 	glBindBuffer(GL_ARRAY_BUFFER, app->square_buffer);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(square_vertices), square_vertices, GL_STATIC_DRAW);
 
-	fn_note_init(&app->current_note);
+	// Setup app state
+	app->mode = FN_MODE_NOTE;
+	app->tool = FN_TOOL_PEN;
+	app->move_speed = 3.0f;
 
-	clib_arena_destroy(&startup_arena);
+	app->current_note = clib_arena_alloc(app->mem, sizeof(fn_note));
+	fn_note_init(app->current_note);
 }
 
 void fn_note_destroy(fn_note *note)
@@ -547,6 +553,6 @@ void fn_glfw_key_callback(GLFWwindow* window, int key, int scancode, int action,
 	
 	if (key == GLFW_KEY_M && action == GLFW_PRESS)
 	{
-		fn_note_print_info(&app->current_note);
+		fn_note_print_info(app->current_note);
 	}
 }

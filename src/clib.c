@@ -48,8 +48,36 @@ void clib_arena_reset(clib_arena *a)
 	a->num_allocations = 0;
 }
 
+void clib_arena_start_scratch(clib_arena *a)
+{
+	CLIB_ASSERT(a, "a is NULL");
+	CLIB_ASSERT(a->scratch_block == NULL, "There is already a scratch block");
+
+	a->scratch_block = a->current_block;
+	a->scratch_index = a->current_index;
+	a->scratch_total_allocation_size = a->total_allocation_size;
+	a->scratch_num_allocations = a->num_allocations;
+}
+
+void clib_arena_stop_scratch(clib_arena *a)
+{
+	CLIB_ASSERT(a, "a is NULL");
+	CLIB_ASSERT(a->scratch_block != NULL, "There is no scratch block");
+
+	a->current_block = a->scratch_block;
+	a->current_index = a->scratch_index;
+	a->total_allocation_size = a->scratch_total_allocation_size;
+	a->num_allocations = a->scratch_num_allocations;
+
+	a->scratch_block = NULL;
+	a->scratch_index = 0;
+	a->scratch_total_allocation_size = 0;
+	a->scratch_num_allocations = 0;
+}
+
 void clib_arena_print_info(clib_arena *a)
 {
+	CLIB_ASSERT(a, "a is NULL");
 	printf("Arena with block size %llu\n", a->block_size);
 	printf("\t%llu allocation(s)\n", a->num_allocations);
 	printf("\tin %llu block(s)\n", a->num_extra_blocks_allocated + 1);

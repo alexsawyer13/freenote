@@ -71,10 +71,10 @@ typedef struct
 	fn_page *first_page;
 
 	v2 viewport;
-	float DPI;
+	f32 DPI;
 
 	v2 page_size;
-	float page_separation;
+	f32 page_separation;
 } fn_note;
 
 typedef enum
@@ -90,8 +90,10 @@ typedef enum
 
 typedef struct fn_app_state
 {
+	clib_arena *mem;
+
 	// App data
-	fn_note current_note;
+	fn_note *current_note;
 
 	// Moving
 	f32 move_speed;
