@@ -93,6 +93,12 @@ typedef struct fn_app_state
 	// App data
 	fn_note current_note;
 
+	// Moving
+	f32 move_speed;
+	v2 old_viewport;
+	v2 movement_anchor;	
+
+	// Drawing
 	fn_page *drawing_page;
 	fn_stroke *drawing_stroke;
 	fn_segment *drawing_segment;
@@ -104,8 +110,8 @@ typedef struct fn_app_state
 	// Platform data
 	GLFWwindow *window;
 
-	v2 mouse_pixels;
-	v2 mouse_points;
+	v2 mouse_screen;
+	v2 mouse_canvas;
 
 	i32 framebuffer_width;
 	i32 framebuffer_height;
@@ -129,8 +135,10 @@ typedef struct fn_app_state
 int main();
 
 void fn_app_init(fn_app_state *app);
+
 void fn_process_input(fn_app_state *app);
-void fn_input_drawing(fn_app_state *app);
+void fn_input_pen(fn_app_state *app, i32 is_pen_down);
+void fn_input_move(fn_app_state *app, i32 is_move_down);
 
 void fn_glfw_key_callback(GLFWwindow* window, int key, int scancode, int action, int mods);
 

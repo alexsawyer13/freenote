@@ -34,9 +34,9 @@ int main()
 		{
 			double x,y;
 			glfwGetCursorPos(app.window, &x, &y);
-			app.mouse_pixels.x = (f32)x;
-			app.mouse_pixels.y = (f32)y;
-			app.mouse_points = fn_pixel_to_point(app.mouse_pixels, app.current_note.viewport, app.framebuffer_size, app.current_note.DPI);
+			app.mouse_screen.x = (f32)x;
+			app.mouse_screen.y = (f32)y;
+			app.mouse_canvas = fn_pixel_to_point(app.mouse_screen, app.current_note.viewport, app.framebuffer_size, app.current_note.DPI);
 		}
 
 		fn_process_input(&app);
@@ -355,17 +355,46 @@ void fn_page_info_recalc(fn_note *note)
 
 void fn_process_input(fn_app_state *app)
 {
+	i32 is_lmb_down = glfwGetMouseButton(app->window, GLFW_MOUSE_BUTTON_1) == GLFW_PRESS;
+	i32 is_rmb_down = glfwGetMouseButton(app->window, GLFW_MOUSE_BUTTON_2) == GLFW_PRESS;
+
 	if (app->tool == FN_TOOL_PEN)
-		fn_input_drawing(app);
+	{
+		fn_input_pen(app, is_lmb_down);
+		fn_input_move(app, is_rmb_down);
+	}
 	else
 		app->drawing_page = NULL;
 }
 
-void fn_input_drawing(fn_app_state *app)
+void fn_input_move(fn_app_state *app, i32 is_move_down)
+{
+	if (glfwGetKey(app->window, GLFW_KEY_R) == GLFW_PRESS)
+	{
+		app->current_note.viewport = (v2) {-10.0f, -10.0f};
+	}
+
+	if (!is_move_down)
+	{
+		app->movement_anchor = app->mouse_canvas;
+		app->old_viewport = app->current_note.viewport;
+		return;
+	}
+
+	v2 movement = (v2) {
+		app->mouse_canvas.x - app->movement_anchor.x,
+		app->mouse_canvas.y - app->movement_anchor.y
+	};
+
+	app->current_note.viewport.x = app->old_viewport.x - movement.x;
+	app->current_note.viewport.y = app->old_viewport.y - movement.y;
+}
+
+void fn_input_pen(fn_app_state *app, i32 is_pen_down)
 {
 	// If not holding left click, then we are no longer drawing
 
-	if (glfwGetMouseButton(app->window, GLFW_MOUSE_BUTTON_1) != GLFW_PRESS)
+	if (!is_pen_down)
 	{
 		app->drawing_page = NULL;
 		app->drawing_stroke = NULL;
@@ -376,11 +405,11 @@ void fn_input_drawing(fn_app_state *app)
 	// If we're not currently drawing and we're within a page, start drawing to it!
 	if (app->drawing_page == NULL)
 	{
-		fn_page *page = fn_page_at_point(&app->current_note, app->mouse_points);
+		fn_page *page = fn_page_at_point(&app->current_note, app->mouse_canvas);
 
 		v2 point_from_page = (v2){
-			app->mouse_points.x - page->position.x,
-			app->mouse_points.y - page->position.y,
+			app->mouse_canvas.x - page->position.x,
+			app->mouse_canvas.y - page->position.y,
 		};
 
 		if ((point_from_page.x > 0.0f && point_from_page.x < app->current_note.page_size.x) && 
@@ -401,8 +430,8 @@ void fn_input_drawing(fn_app_state *app)
 
 		// Calculated mouse position from current page origin
 		v2 point_from_page  = (v2){
-			app->mouse_points.x - app->drawing_page->position.x,
-			app->mouse_points.y - app->drawing_page->position.y,
+			app->mouse_canvas.x - app->drawing_page->position.x,
+			app->mouse_canvas.y - app->drawing_page->position.y,
 		};
 
 		// Allocate a new segment if needed
@@ -435,6 +464,7 @@ void fn_app_init(fn_app_state *app)
 
 	app->mode = FN_MODE_NOTE;
 	app->tool = FN_TOOL_PEN;
+	app->move_speed = 3.0f;
 
 	clib_arena *startup_arena;
 	startup_arena = clib_arena_init(1024*1024);
