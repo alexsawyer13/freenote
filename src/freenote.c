@@ -135,6 +135,68 @@ void fn_note_draw(fn_app_state *app, fn_note *note)
 	}
 }
 
+void fn_note_write_file(fn_app_state *app, fn_note *note, const char *path)
+{
+	clib_arena_start_scratch(app->mem);
+
+	u64 buffer_capacity = 1024*1024;
+	u64 buffer_count = 0;
+	char *buffer = clib_arena_alloc(app->mem, buffer_capacity);
+
+	u64 ret = snprintf(buffer + buffer_count, buffer_capacity - buffer_count, "v %d %d %d\n", VERSION_MAJOR, VERSION_MINOR, VERSION_REVISION);
+	CLIB_ASSERT(ret < (buffer_capacity - buffer_count), "Out of space in buffer");
+	buffer_count += ret;
+
+	fn_page *page = note->first_page;
+	while (page != NULL)
+	{
+		u64 ret = snprintf(buffer + buffer_count, buffer_capacity - buffer_count, "p %llu\n", page->page_number);
+		CLIB_ASSERT(ret < (buffer_capacity - buffer_count), "Out of space in buffer");
+		buffer_count += ret;
+
+		fn_stroke *stroke = page->first_stroke;
+		while (stroke != NULL)
+		{
+			u64 ret = snprintf(buffer + buffer_count, buffer_capacity - buffer_count, "s\n");
+			CLIB_ASSERT(ret < (buffer_capacity - buffer_count), "Out of space in buffer");
+			buffer_count += ret;
+
+			fn_segment *segment = &stroke->first_segment;
+			while (segment != NULL)
+			{
+				for (u64 i = 0; i < segment->num_points; i++)
+				{
+					fn_point *point = &segment->points[i];
+
+					u64 ret = snprintf(buffer + buffer_count, buffer_capacity - buffer_count, "p %f %f\n", point->pos.x, point->pos.y);
+					CLIB_ASSERT(ret < (buffer_capacity - buffer_count), "Out of space in buffer");
+					buffer_count += ret;
+				}
+
+				segment = segment->next;
+			}
+
+			stroke = stroke->next;
+		}
+
+		page = page->next;
+	}
+
+	printf("%s\n", buffer);
+
+	FILE *f = fopen(path, "w");	
+	CLIB_ASSERT(f, "Failed to open file");
+	CLIB_ASSERT(fwrite(buffer, 1, buffer_count, f) == buffer_count, "Failed to write");
+	fclose(f);
+
+	clib_arena_stop_scratch(app->mem);
+}
+
+void fn_note_read_file(fn_app_state *app, fn_note *note, const char *path)
+{
+
+}
+
 GLuint fn_shader_load(clib_arena *arena, const char *vertex_path, const char *fragment_path)
 {
 	GLuint vert, frag, prog;
@@ -554,9 +616,10 @@ void fn_glfw_key_callback(GLFWwindow* window, int key, int scancode, int action,
 {
 	fn_app_state *app = (fn_app_state*)glfwGetWindowUserPointer(window);
 	CLIB_ASSERT(app, "app is NULL");
-	
-	if (key == GLFW_KEY_M && action == GLFW_PRESS)
+
+	if (action == GLFW_PRESS)
 	{
-		fn_note_print_info(app->current_note);
+		if (key == GLFW_KEY_M) fn_note_print_info(app->current_note);
+		if (key == GLFW_KEY_S) fn_note_write_file(app, app->current_note, "/home/alex/dev/freenote/note.fn");
 	}
 }

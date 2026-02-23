@@ -14,6 +14,11 @@
  * A4 = 595x842 points
 */
 
+#define VERSION_MAJOR 0
+#define VERSION_MINOR 0
+#define VERSION_REVISION 0
+#define VERSION_STRING "v0.0.0"
+
 #define FN_NUM_SEGMENT_POINTS 16
 #define FN_POINT_SAMPLE_TIME 0.01f
 #define FN_PAGE_ARENA_SIZE (1024*1024)
@@ -146,7 +151,11 @@ void fn_glfw_key_callback(GLFWwindow* window, int key, int scancode, int action,
 
 void fn_note_init(fn_note *note);
 void fn_note_destroy(fn_note *note);
+
 void fn_note_draw(fn_app_state *app, fn_note *note);
+void fn_note_write_file(fn_app_state *app, fn_note *note, const char *path);
+void fn_note_read_file(fn_app_state *app, fn_note *note, const char *path);
+
 void fn_note_print_info(fn_note *note);
 
 void fn_page_init(fn_page *page);
